@@ -126,6 +126,7 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 	  ray r = raycastFromCameraKernel(resolution, 0, x, y, cam.position, cam.view, cam.up, cam.fov);
 	  vec3 isectPoint = vec3(0,0,0);
 	  vec3 isectNormal = vec3(0,0,0);
+	  int matId;
 	  float t = FLT_MAX;
 
 	  // testing intersections
@@ -133,7 +134,7 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 	  {
 		  if (geoms[i].type == GEOMTYPE::SPHERE)
 		  {
-			  // do cube intersection
+			  // do sphere intersection
 			  vec3 isectPointTemp = vec3(0,0,0);
 			  vec3 isectNormalTemp = vec3(0,0,0);
 
@@ -144,12 +145,24 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 				  t = dist;
 				  isectPoint = isectPointTemp;
 				  isectNormal = isectNormalTemp;
+				  matId = geoms[i].materialid;
 			  }
 		  }
 		  else if (geoms[i].type == GEOMTYPE::CUBE)
 		  {
-			  // do sphere intersection
+			  // do cube intersection
+			  vec3 isectPointTemp = vec3(0,0,0);
+			  vec3 isectNormalTemp = vec3(0,0,0);
 
+			  float dist = boxIntersectionTest(geoms[i], r, isectPointTemp, isectNormalTemp);
+
+			  if (dist < t && dist != -1)
+			  {
+				  t = dist;
+				  isectPoint = isectPointTemp;
+				  isectNormal = isectNormalTemp;
+				  matId = geoms[i].materialid;
+			  }
 		  }
 		  else if (geoms[i].type == GEOMTYPE::MESH)
 		  {
@@ -161,11 +174,11 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 	  // sphere intersection check
 	  if (t != FLT_MAX)
 	  {
-		  colors[index] = vec3(1,0,0);
+		  colors[index] = cudamat[matId].color;
 	  }
 	  else
 	  {
-		  colors[index] = vec3(1,1,1);
+		  colors[index] = vec3(0.5,0.5,0.5);
 	  }
 
 	  // material check
