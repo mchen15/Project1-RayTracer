@@ -112,6 +112,56 @@ __global__ void sendImageToPBO(uchar4* PBOpos, glm::vec2 resolution, glm::vec3* 
   }
 }
 
+// Loop through geometry and test against ray.
+// Returns -1 if no object is intersected with the ray, else returns t such that isectPoint = P + Dt 
+__device__ float intersectionTest(staticGeom* geoms, int numberOfGeoms, ray r, vec3 &isectPoint, vec3 &isectNormal, int &matId)
+{
+	float t = FLT_MAX;
+
+	// testing intersections
+	for (int i = 0 ; i < numberOfGeoms ; ++i)
+	{
+		if (geoms[i].type == GEOMTYPE::SPHERE)
+		{
+			// do sphere intersection
+			vec3 isectPointTemp = vec3(0,0,0);
+			vec3 isectNormalTemp = vec3(0,0,0);
+
+			float dist = sphereIntersectionTest(geoms[i], r, isectPointTemp, isectNormalTemp);
+
+			if (dist < t && dist != -1)
+			{
+				t = dist;
+				isectPoint = isectPointTemp;
+				isectNormal = isectNormalTemp;
+				matId = geoms[i].materialid;
+			}
+		}
+		else if (geoms[i].type == GEOMTYPE::CUBE)
+		{
+			// do cube intersection
+			vec3 isectPointTemp = vec3(0,0,0);
+			vec3 isectNormalTemp = vec3(0,0,0);
+
+			float dist = boxIntersectionTest(geoms[i], r, isectPointTemp, isectNormalTemp);
+
+			if (dist < t && dist != -1)
+			{
+				t = dist;
+				isectPoint = isectPointTemp;
+				isectNormal = isectNormalTemp;
+				matId = geoms[i].materialid;
+			}
+		}
+		else if (geoms[i].type == GEOMTYPE::MESH)
+		{
+			// do triangle intersections
+		}
+	} 
+
+	return t;
+}
+
 //TODO: IMPLEMENT THIS FUNCTION
 //Core raytracer kernel
 __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, int rayDepth, glm::vec3* colors,
@@ -123,53 +173,22 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 
   if ((x<=resolution.x && y<=resolution.y))
   {
-	  ray r = raycastFromCameraKernel(resolution, 0, x, y, cam.position, cam.view, cam.up, cam.fov);
-	  vec3 isectPoint = vec3(0,0,0);
-	  vec3 isectNormal = vec3(0,0,0);
-	  int matId;
-	  float t = FLT_MAX;
-
-	  // testing intersections
-	  for (int i = 0 ; i < numberOfGeoms ; ++i)
+	  if (rayDepth > MAX_DEPTH) 
 	  {
-		  if (geoms[i].type == GEOMTYPE::SPHERE)
-		  {
-			  // do sphere intersection
-			  vec3 isectPointTemp = vec3(0,0,0);
-			  vec3 isectNormalTemp = vec3(0,0,0);
-
-			  float dist = sphereIntersectionTest(geoms[i], r, isectPointTemp, isectNormalTemp);
-
-			  if (dist < t && dist != -1)
-			  {
-				  t = dist;
-				  isectPoint = isectPointTemp;
-				  isectNormal = isectNormalTemp;
-				  matId = geoms[i].materialid;
-			  }
-		  }
-		  else if (geoms[i].type == GEOMTYPE::CUBE)
-		  {
-			  // do cube intersection
-			  vec3 isectPointTemp = vec3(0,0,0);
-			  vec3 isectNormalTemp = vec3(0,0,0);
-
-			  float dist = boxIntersectionTest(geoms[i], r, isectPointTemp, isectNormalTemp);
-
-			  if (dist < t && dist != -1)
-			  {
-				  t = dist;
-				  isectPoint = isectPointTemp;
-				  isectNormal = isectNormalTemp;
-				  matId = geoms[i].materialid;
-			  }
-		  }
-		  else if (geoms[i].type == GEOMTYPE::MESH)
-		  {
-			  // do triangle intersections
-		  }
+		  //bgc
+		  colors[index] = vec3(0,0,0); 
+		  return;
 	  }
 
+
+	  ray r = raycastFromCameraKernel(resolution, 0, x, y, cam.position, cam.view, cam.up, cam.fov);
+
+	  vec3 isectPoint = vec3(0,0,0);
+	  vec3 isectNormal = vec3(0,0,0);
+	  int matId = -1;
+	  float t = FLT_MAX;
+
+	  t = intersectionTest(geoms, numberOfGeoms, r, isectPoint, isectNormal, matId);
 
 	  // intersection check
 	  if (t != FLT_MAX)
@@ -198,6 +217,7 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 		 // colors[index] = vec3(0,0,0);
   }
 }
+
 
 //TODO: FINISH THIS FUNCTION
 // Wrapper for the __global__ call that sets up the kernel calls and does a ton of memory management
@@ -267,7 +287,6 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   cam.view = renderCam->views[frame];
   cam.up = renderCam->ups[frame];
   cam.fov = renderCam->fov;
-
 
   //kernel launches
   raytraceRay<<<fullBlocksPerGrid, threadsPerBlock>>>(renderCam->resolution, (float)iterations, cam, traceDepth, cudaimage, cudageoms, numberOfGeoms, cudamat, numberOfMat, cudalights, numberOfLights);
