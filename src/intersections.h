@@ -162,44 +162,58 @@ __host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& 
 
 	glm::vec3 localNormal = glm::vec3(0,0,0); // depending on which plane the intersection point is on, localNormal will be set accordingly
 
+	float frontCheck = FLT_MAX;
+	float backCheck = FLT_MAX;
+	float leftCheck = FLT_MAX;
+	float rightCheck = FLT_MAX;
+	float topCheck = FLT_MAX;
+	float bottomCheck = FLT_MAX;
+	float eps = 0.001;
+	
+	glm::vec3 localIsectPoint = getPointOnRay(rt, returnVal);
 
-	// front
-	if (glm::dot(intersectionPoint - minBoxCoordinate, frontNormal) < EPSILON)
+	frontCheck = glm::dot(localIsectPoint - minBoxCoordinate, frontNormal);
+	backCheck = glm::dot(localIsectPoint - maxBoxCoordinate, backNormal);
+	leftCheck = glm::dot(localIsectPoint - minBoxCoordinate, leftNormal);
+	rightCheck = glm::dot(localIsectPoint - maxBoxCoordinate, rightNormal);
+	topCheck = glm::dot(localIsectPoint - maxBoxCoordinate, topNormal);
+	bottomCheck = glm::dot(localIsectPoint - minBoxCoordinate, bottomNormal);
+
+	// front	
+	if ( frontCheck < eps && frontCheck > -eps )
 	{
 		normal = glm::normalize(multiplyMV(box.transform, glm::vec4(frontNormal,0.0f)));
 	}
 	// back
-	else if (glm::dot(intersectionPoint - maxBoxCoordinate, backNormal) < EPSILON)
+	else if ( backCheck < eps && backCheck > -eps )
 	{
 		normal = glm::normalize(multiplyMV(box.transform, glm::vec4(backNormal,0.0f)));
 	}
 	// left
-	else if (glm::dot(intersectionPoint - minBoxCoordinate, leftNormal) < EPSILON)
+	else if ( leftCheck < eps && leftCheck > -eps)
 	{
 		normal = glm::normalize(multiplyMV(box.transform, glm::vec4(leftNormal,0.0f)));
 	}
 	// right
-	else if (glm::dot(intersectionPoint - maxBoxCoordinate, rightNormal) < EPSILON)
+	else if ( rightCheck < eps && rightCheck > -eps)
 	{
 		normal = glm::normalize(multiplyMV(box.transform, glm::vec4(rightNormal,0.0f)));
 	}
 	// top
-	else if (glm::dot(intersectionPoint - maxBoxCoordinate, topNormal) < EPSILON)
+	else if ( topCheck < eps && topCheck > -eps)
 	{
 		normal = glm::normalize(multiplyMV(box.transform, glm::vec4(topNormal,0.0f)));
 	}
 	// bottom
-	else if (glm::dot(intersectionPoint - minBoxCoordinate, bottomNormal) < EPSILON)
+	else if ( bottomCheck < eps && bottomCheck > -eps)
 	{
 		normal = glm::normalize(multiplyMV(box.transform, glm::vec4(bottomNormal,0.0f)));
 	}
 	else
 	{
 		// error condition
-		returnVal = -100;
+		returnVal = FLT_MAX;
 	}
-
-	// transform normal back to world coordinates
 
 	return returnVal;
 }

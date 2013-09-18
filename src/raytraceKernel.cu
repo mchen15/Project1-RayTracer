@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <cmath>
+#include <vector>
 #include "sceneStructs.h"
 #include "glm/glm.hpp"
 #include "utilities.h"
@@ -19,6 +20,7 @@
 using glm::vec3;
 using glm::cross;
 using glm::length;
+using glm::dot;
 using glm::normalize;
 
 #if CUDA_VERSION >= 5000
@@ -165,7 +167,7 @@ __device__ float intersectionTest(staticGeom* geoms, int numberOfGeoms, ray r, v
 //TODO: IMPLEMENT THIS FUNCTION
 //Core raytracer kernel
 __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, int rayDepth, glm::vec3* colors,
-                            staticGeom* geoms, int numberOfGeoms, material* cudamat, int numberOfMat, material* cudalights, int numberOfLights){
+                            staticGeom* geoms, int numberOfGeoms, material* cudamat, int numberOfMat, int* cudalightIndex, int numberOfLights){
 
   int x = (blockIdx.x * blockDim.x) + threadIdx.x;
   int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -173,13 +175,12 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 
   if ((x<=resolution.x && y<=resolution.y))
   {
-	  if (rayDepth > MAX_DEPTH) 
-	  {
-		  //bgc
-		  colors[index] = vec3(0,0,0); 
-		  return;
-	  }
-
+	  //if (rayDepth > MAX_DEPTH) 
+	  //{
+		 // //bgc
+		 // colors[index] = vec3(0,0,0); 
+		 // return;
+	  //}
 
 	  ray r = raycastFromCameraKernel(resolution, 0, x, y, cam.position, cam.view, cam.up, cam.fov);
 
@@ -190,18 +191,54 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 
 	  t = intersectionTest(geoms, numberOfGeoms, r, isectPoint, isectNormal, matId);
 
+	  // go through each light source and compute shading
+	  for (int i = 0 ; i < numberOfLights ; ++i)
+	  {
+		  staticGeom lightSource = geoms[cudalightIndex[i]];
+		  vec3 lightToISect = normalize(lightSource.translation - isectPoint);
+		  vec3 eyeToIsect = normalize(cam.position - isectPoint);
+		  vec3 lightColor = cudamat[lightSource.materialid].color;
+		  vec3 materialColor = cudamat[matId].color;
+		  //float lightEmit = cudamat[lightSource.materialid].emittance;
+
+		  float diffuseTerm = clamp(dot(isectNormal, lightToISect), 0.0f, 1.0f);
+
+
+
+		  colors[index] =  materialColor * lightColor * diffuseTerm;
+	  }
+	  
+	  // checking if there's intersection error
+	  //if (t == -100)
+	  //{
+		 // colors[index] = vec3(1,1,1);
+	  //}
+
+
+
+
+
+
+
+
+
+
+	  // debugging normal
+	  colors[index] = isectNormal * isectNormal;
+
+
 	  // intersection check
-	  if (t != FLT_MAX)
-	  {
-		  if (t == -100) // no normal was calculated.
-			  colors[index] = vec3(0,0,0);
-		  else
-			  colors[index] = cudamat[matId].color;
-	  }
-	  else
-	  {
-		  colors[index] = vec3(0.5,0.5,0.5);
-	  }
+	  //if (t != FLT_MAX)
+	  //{
+		 // if (t == -100) // no normal was calculated.
+			//  colors[index] = vec3(0,0,0);
+		 // else
+			//  colors[index] = cudamat[matId].color;
+	  //}
+	  //else
+	  //{
+		 // colors[index] = vec3(0.5,0.5,0.5);
+	  //}
 
 	  // material check
 	  //if (numberOfMat == 7)
@@ -236,6 +273,9 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   cudaMemcpy( cudaimage, renderCam->image, (int)renderCam->resolution.x*(int)renderCam->resolution.y*sizeof(glm::vec3), cudaMemcpyHostToDevice);
   
   //package geometry and materials and sent to GPU
+  int numberOfLights = 0;
+  std::vector<int> lightIndices;
+
   staticGeom* geomList = new staticGeom[numberOfGeoms];
   for(int i=0; i<numberOfGeoms; i++){
     staticGeom newStaticGeom;
@@ -247,24 +287,33 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
     newStaticGeom.transform = geoms[i].transforms[frame];
     newStaticGeom.inverseTransform = geoms[i].inverseTransforms[frame];
     geomList[i] = newStaticGeom;
+
+	if (materials[newStaticGeom.materialid].emittance != 0)
+	{
+		numberOfLights++;
+		lightIndices.push_back(i);
+	}
   }
   
   staticGeom* cudageoms = NULL;
   cudaMalloc((void**)&cudageoms, numberOfGeoms*sizeof(staticGeom));
   cudaMemcpy( cudageoms, geomList, numberOfGeoms*sizeof(staticGeom), cudaMemcpyHostToDevice);
 
-  // TODO: check number of lights and number of materials
-  int numberOfLights = 0;
+  // check number of materials
   int numberOfMat = 0;
 
   for (int i = 0 ; i < numberOfMaterials ; ++i)
   {
-	 if (materials[i].emittance != 0)
-		 numberOfLights++;
-	 else
-		 numberOfMat++;
+	numberOfMat++;
   }
-  
+
+  // set up lights indices to pass to cuda
+ int* cudalightIndex = NULL;
+ cudaMalloc((void**) &cudalightIndex, numberOfLights * sizeof(int));
+ cudaMemcpy(cudalightIndex, &(lightIndices[0]), numberOfLights * sizeof(int), cudaMemcpyHostToDevice);
+
+
+
   // Regaring (void**) ...
   // All CUDA API functions return an error code (or cudaSuccess if no error occured). 
   // All other parameters are passed by reference. However, in plain C you cannot have references, 
@@ -273,10 +322,6 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   material* cudamat = NULL;
   cudaMalloc((void**)&cudamat, numberOfMat * sizeof(material));
   cudaMemcpy(cudamat, materials, numberOfMat * sizeof(material), cudaMemcpyHostToDevice);
-
-  material* cudalights = NULL;
-  cudaMalloc((void**)&cudalights, numberOfLights * sizeof(material));
-  cudaMemcpy(cudalights, &(materials[numberOfMat]), numberOfLights * sizeof(material), cudaMemcpyHostToDevice);
   
   //package camera
   //Q: Why don't we need to use cudaMalloc and cudaMemcpy here?
@@ -289,7 +334,7 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   cam.fov = renderCam->fov;
 
   //kernel launches
-  raytraceRay<<<fullBlocksPerGrid, threadsPerBlock>>>(renderCam->resolution, (float)iterations, cam, traceDepth, cudaimage, cudageoms, numberOfGeoms, cudamat, numberOfMat, cudalights, numberOfLights);
+  raytraceRay<<<fullBlocksPerGrid, threadsPerBlock>>>(renderCam->resolution, (float)iterations, cam, traceDepth, cudaimage, cudageoms, numberOfGeoms, cudamat, numberOfMat, cudalightIndex, numberOfLights);
 
   sendImageToPBO<<<fullBlocksPerGrid, threadsPerBlock>>>(PBOpos, renderCam->resolution, cudaimage);
 
