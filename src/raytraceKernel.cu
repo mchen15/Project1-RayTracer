@@ -164,6 +164,37 @@ __device__ float intersectionTest(staticGeom* geoms, int numberOfGeoms, ray r, v
 	return t;
 }
 
+// send out shadow feeler rays and compute the tint color
+__device__ vec3 shadowFeeler(staticGeom* geoms, int numberOfGeoms, material* materials, vec3 isectPoint, vec3 isectNormal, staticGeom lightSource)
+{
+	vec3 tint = vec3(1,1,1);
+	vec3 shadowRayIsectPoint = vec3(0,0,0);
+	vec3 shadowRayIsectNormal = vec3(0,0,0);
+	int shadowRayIsectMatId = -1;
+	float t = -1;
+	float eps = 1e-5;
+	ray shadowRay;
+
+	// point light
+	vec3 lightToIsect = lightSource.translation - isectPoint;
+	float maxT = length(lightToIsect);
+	shadowRay.direction = normalize(lightToIsect);
+	shadowRay.origin = isectPoint + isectNormal * eps; // consider moving this in the shadow ray direction
+
+	t = intersectionTest(geoms, numberOfGeoms, shadowRay, shadowRayIsectPoint, shadowRayIsectNormal, shadowRayIsectMatId);
+
+	if (t != -1 && t > EPSILON)
+	{
+		if (t < maxT)
+		{
+			tint = vec3(0,0,0); // todo: base this one something else so we can get lighter shadows
+		}
+	}
+
+	return tint;
+}
+
+
 //TODO: IMPLEMENT THIS FUNCTION
 //Core raytracer kernel
 __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, int rayDepth, glm::vec3* colors,
@@ -172,6 +203,8 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
   int x = (blockIdx.x * blockDim.x) + threadIdx.x;
   int y = (blockIdx.y * blockDim.y) + threadIdx.y;
   int index = x + (y * resolution.x);
+  
+  colors[index] = vec3(0,0,0);
 
   if ((x<=resolution.x && y<=resolution.y))
   {
@@ -195,6 +228,14 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 	  for (int i = 0 ; i < numberOfLights ; ++i)
 	  {
 		  staticGeom lightSource = geoms[cudalightIndex[i]];
+		  vec3 tint = shadowFeeler(geoms, numberOfGeoms, cudamat, isectPoint, isectNormal, lightSource);
+
+		  if (tint == vec3(0,0,0))
+		  {
+				colors[index] = tint;
+				continue;
+		  }
+
 		  vec3 lightToISect = normalize(lightSource.translation - isectPoint);
 		  vec3 eyeToIsect = normalize(cam.position - isectPoint);
 		  vec3 lightColor = cudamat[lightSource.materialid].color;
@@ -202,29 +243,15 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 		  //float lightEmit = cudamat[lightSource.materialid].emittance;
 
 		  float diffuseTerm = clamp(dot(isectNormal, lightToISect), 0.0f, 1.0f);
-
-
-
-		  colors[index] =  materialColor * lightColor * diffuseTerm;
+		  colors[index] = colors[index] + materialColor * lightColor * diffuseTerm;
 	  }
 	  
-	  // checking if there's intersection error
-	  //if (t == -100)
-	  //{
-		 // colors[index] = vec3(1,1,1);
-	  //}
-
-
-
-
-
-
-
-
-
+	  ////////////////
+	  // debug code //
+	  ////////////////
 
 	  // debugging normal
-	  colors[index] = isectNormal * isectNormal;
+	  //colors[index] = isectNormal * isectNormal;
 
 
 	  // intersection check
