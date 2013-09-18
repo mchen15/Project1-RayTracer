@@ -129,26 +129,79 @@ __host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& 
 		}
 	}
 
+	float returnVal = -1;
+
     if (Tnear < 0)
 	{
 
 		glm::vec3 realIntersectionPoint = multiplyMV(box.transform, glm::vec4(getPointOnRay(rt, Tfar), 1.0));
 		intersectionPoint = realIntersectionPoint;
-
 		glm::vec3 realOrigin = multiplyMV(box.transform, glm::vec4(0,0,0,1));
-		//TODO: compute normal
-
-		return Tfar;
+		returnVal = Tfar;
 	}
 	else
 	{
 		glm::vec3 realIntersectionPoint = multiplyMV(box.transform, glm::vec4(getPointOnRay(rt, Tnear), 1.0));
 		intersectionPoint = realIntersectionPoint;
-
 		glm::vec3 realOrigin = multiplyMV(box.transform, glm::vec4(0,0,0,1));
-		//TODO: compute normal
-		return Tnear;
+		returnVal = Tnear;
 	}
+
+	
+	// compute normal
+	glm::vec3 frontNormal = glm::vec3(0,0,1);
+	glm::vec3 backNormal = glm::vec3(0,0,-1);
+	glm::vec3 rightNormal = glm::vec3(1,0,0);
+	glm::vec3 leftNormal = glm::vec3(-1,0,0);
+	glm::vec3 topNormal = glm::vec3(0,1,0);
+	glm::vec3 bottomNormal = glm::vec3(0,-1,0);
+
+	// TODO: verify these bounds. Note the z coordinates
+	glm::vec3 minBoxCoordinate(minBoxXYZ[0], minBoxXYZ[1], maxBoxXYZ[2]);
+	glm::vec3 maxBoxCoordinate(maxBoxXYZ[0], maxBoxXYZ[1], minBoxXYZ[2]);
+
+	glm::vec3 localNormal = glm::vec3(0,0,0); // depending on which plane the intersection point is on, localNormal will be set accordingly
+
+
+	// front
+	if (glm::dot(intersectionPoint - minBoxCoordinate, frontNormal) < EPSILON)
+	{
+		normal = glm::normalize(multiplyMV(box.transform, glm::vec4(frontNormal,0.0f)));
+	}
+	// back
+	else if (glm::dot(intersectionPoint - maxBoxCoordinate, backNormal) < EPSILON)
+	{
+		normal = glm::normalize(multiplyMV(box.transform, glm::vec4(backNormal,0.0f)));
+	}
+	// left
+	else if (glm::dot(intersectionPoint - minBoxCoordinate, leftNormal) < EPSILON)
+	{
+		normal = glm::normalize(multiplyMV(box.transform, glm::vec4(leftNormal,0.0f)));
+	}
+	// right
+	else if (glm::dot(intersectionPoint - maxBoxCoordinate, rightNormal) < EPSILON)
+	{
+		normal = glm::normalize(multiplyMV(box.transform, glm::vec4(rightNormal,0.0f)));
+	}
+	// top
+	else if (glm::dot(intersectionPoint - maxBoxCoordinate, topNormal) < EPSILON)
+	{
+		normal = glm::normalize(multiplyMV(box.transform, glm::vec4(topNormal,0.0f)));
+	}
+	// bottom
+	else if (glm::dot(intersectionPoint - minBoxCoordinate, bottomNormal) < EPSILON)
+	{
+		normal = glm::normalize(multiplyMV(box.transform, glm::vec4(bottomNormal,0.0f)));
+	}
+	else
+	{
+		// error condition
+		returnVal = -100;
+	}
+
+	// transform normal back to world coordinates
+
+	return returnVal;
 }
 
 //LOOK: Here's an intersection test example from a sphere. Now you just need to figure out cube and, optionally, triangle.

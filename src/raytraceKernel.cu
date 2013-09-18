@@ -171,10 +171,13 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 	  }
 
 
-	  // sphere intersection check
+	  // intersection check
 	  if (t != FLT_MAX)
 	  {
-		  colors[index] = cudamat[matId].color;
+		  if (t == -100) // no normal was calculated.
+			  colors[index] = vec3(0,0,0);
+		  else
+			  colors[index] = cudamat[matId].color;
 	  }
 	  else
 	  {
