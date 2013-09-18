@@ -16,6 +16,11 @@
 #include "interactions.h"
 #include <vector>
 
+using glm::vec3;
+using glm::cross;
+using glm::length;
+using glm::normalize;
+
 #if CUDA_VERSION >= 5000
     #include <helper_math.h>
 #else
@@ -32,6 +37,7 @@ void checkCUDAError(const char *msg) {
 
 //LOOK: This function demonstrates how to use thrust for random number generation on the GPU!
 //Function that generates static.
+//Thrust doc: https://developer.nvidia.com/thrust
 __host__ __device__ glm::vec3 generateRandomNumberFromThread(glm::vec2 resolution, float time, int x, int y){
   int index = x + (y * resolution.x);
    
@@ -43,10 +49,22 @@ __host__ __device__ glm::vec3 generateRandomNumberFromThread(glm::vec2 resolutio
 
 //TODO: IMPLEMENT THIS FUNCTION
 //Function that does the initial raycast from the camera
-__host__ __device__ ray raycastFromCameraKernel(glm::vec2 resolution, float time, int x, int y, glm::vec3 eye, glm::vec3 view, glm::vec3 up, glm::vec2 fov){
+__host__ __device__ ray raycastFromCameraKernel(glm::vec2 resolution, float time, int x, int y, glm::vec3 eye, glm::vec3 view, glm::vec3 up, glm::vec2 fov)
+{
   ray r;
-  r.origin = glm::vec3(0,0,0);
-  r.direction = glm::vec3(0,0,-1);
+  float width = resolution.x;
+  float height = resolution.y;
+  vec3 M = eye + view;
+  vec3 A = cross(view, up);
+  vec3 B = cross(A, view);
+  vec3 H = (A * length(view) * tanf(fov.x * (PI/180))) / length(A);
+  vec3 V = (B * length(view) * tanf(fov.y * (PI/180))) / length(B);
+  vec3 P = M + ((2*x)/(width-1)-1)*H + ((2*y)/(height-1)-1)*V;
+  vec3 D = P - eye;
+  vec3 DN = glm::normalize(D);
+
+  r.origin = P;
+  r.direction = DN;
   return r;
 }
 
@@ -97,16 +115,29 @@ __global__ void sendImageToPBO(uchar4* PBOpos, glm::vec2 resolution, glm::vec3* 
 //TODO: IMPLEMENT THIS FUNCTION
 //Core raytracer kernel
 __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, int rayDepth, glm::vec3* colors,
-                            staticGeom* geoms, int numberOfGeoms){
+                            staticGeom* geoms, int numberOfGeoms, material* cudamat, int numberOfMat, material* cudalights, int numberOfLights){
 
   int x = (blockIdx.x * blockDim.x) + threadIdx.x;
   int y = (blockIdx.y * blockDim.y) + threadIdx.y;
   int index = x + (y * resolution.x);
 
-  if((x<=resolution.x && y<=resolution.y)){
+  if ((x<=resolution.x && y<=resolution.y))
+  {
+	  ray r = raycastFromCameraKernel(resolution, 0, x, y, cam.position, cam.view, cam.up, cam.fov);
 
-    colors[index] = generateRandomNumberFromThread(resolution, time, x, y);
-   }
+	  // material check
+	  //if (numberOfMat == 7)
+		 // colors[index] = generateRandomNumberFromThread(resolution, time, x, y);
+	  //else
+		 // colors[index] = vec3(0,0,0);
+
+
+	  // light check
+	  //if (cudalights[0].emittance == 1 && cudalights[1].emittance == 15)
+		 // colors[index] = generateRandomNumberFromThread(resolution, time, x, y);
+	  //else
+		 // colors[index] = vec3(0,0,0);
+  }
 }
 
 //TODO: FINISH THIS FUNCTION
@@ -142,8 +173,35 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   staticGeom* cudageoms = NULL;
   cudaMalloc((void**)&cudageoms, numberOfGeoms*sizeof(staticGeom));
   cudaMemcpy( cudageoms, geomList, numberOfGeoms*sizeof(staticGeom), cudaMemcpyHostToDevice);
+
+  // TODO: check number of lights and number of materials
+  int numberOfLights = 0;
+  int numberOfMat = 0;
+
+  for (int i = 0 ; i < numberOfMaterials ; ++i)
+  {
+	 if (materials[i].emittance != 0)
+		 numberOfLights++;
+	 else
+		 numberOfMat++;
+  }
+  
+  // Regaring (void**) ...
+  // All CUDA API functions return an error code (or cudaSuccess if no error occured). 
+  // All other parameters are passed by reference. However, in plain C you cannot have references, 
+  // that's why you have to pass an address of the variable that you want the return information to be stored. 
+  // Since you are returning a pointer, you need to pass a double-pointer.
+  material* cudamat = NULL;
+  cudaMalloc((void**)&cudamat, numberOfMat * sizeof(material));
+  cudaMemcpy(cudamat, materials, numberOfMat * sizeof(material), cudaMemcpyHostToDevice);
+
+  material* cudalights = NULL;
+  cudaMalloc((void**)&cudalights, numberOfLights * sizeof(material));
+  cudaMemcpy(cudalights, &(materials[numberOfMat]), numberOfLights * sizeof(material), cudaMemcpyHostToDevice);
   
   //package camera
+  //Q: Why don't we need to use cudaMalloc and cudaMemcpy here?
+  //A: During kernel execution, the value cam will be put onto GPU memory stack since this value is not being passed by reference.
   cameraData cam;
   cam.resolution = renderCam->resolution;
   cam.position = renderCam->positions[frame];
@@ -151,8 +209,9 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   cam.up = renderCam->ups[frame];
   cam.fov = renderCam->fov;
 
+
   //kernel launches
-  raytraceRay<<<fullBlocksPerGrid, threadsPerBlock>>>(renderCam->resolution, (float)iterations, cam, traceDepth, cudaimage, cudageoms, numberOfGeoms);
+  raytraceRay<<<fullBlocksPerGrid, threadsPerBlock>>>(renderCam->resolution, (float)iterations, cam, traceDepth, cudaimage, cudageoms, numberOfGeoms, cudamat, numberOfMat, cudalights, numberOfLights);
 
   sendImageToPBO<<<fullBlocksPerGrid, threadsPerBlock>>>(PBOpos, renderCam->resolution, cudaimage);
 
