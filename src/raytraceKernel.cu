@@ -57,8 +57,8 @@ __host__ __device__ ray raycastFromCameraKernel(glm::vec2 resolution, float time
   vec3 M = eye + view;
   vec3 A = cross(view, up);
   vec3 B = cross(A, view);
-  vec3 H = (A * length(view) * tanf(fov.x * (PI/180))) / length(A);
-  vec3 V = (B * length(view) * tanf(fov.y * (PI/180))) / length(B);
+  vec3 H = (A * length(view) * tanf(fov.x * (PI/180.0f))) / length(A);
+  vec3 V = -(B * length(view) * tanf(fov.y * (PI/180.0f))) / length(B); // LOOK: Multiplied by negative to flip the image
   vec3 P = M + ((2*x)/(width-1)-1)*H + ((2*y)/(height-1)-1)*V;
   vec3 D = P - eye;
   vec3 DN = glm::normalize(D);
@@ -124,6 +124,49 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
   if ((x<=resolution.x && y<=resolution.y))
   {
 	  ray r = raycastFromCameraKernel(resolution, 0, x, y, cam.position, cam.view, cam.up, cam.fov);
+	  vec3 isectPoint = vec3(0,0,0);
+	  vec3 isectNormal = vec3(0,0,0);
+	  float t = FLT_MAX;
+
+	  // testing intersections
+	  for (int i = 0 ; i < numberOfGeoms ; ++i)
+	  {
+		  if (geoms[i].type == GEOMTYPE::SPHERE)
+		  {
+			  // do cube intersection
+			  vec3 isectPointTemp = vec3(0,0,0);
+			  vec3 isectNormalTemp = vec3(0,0,0);
+
+			  float dist = sphereIntersectionTest(geoms[i], r, isectPointTemp, isectNormalTemp);
+
+			  if (dist < t && dist != -1)
+			  {
+				  t = dist;
+				  isectPoint = isectPointTemp;
+				  isectNormal = isectNormalTemp;
+			  }
+		  }
+		  else if (geoms[i].type == GEOMTYPE::CUBE)
+		  {
+			  // do sphere intersection
+
+		  }
+		  else if (geoms[i].type == GEOMTYPE::MESH)
+		  {
+			  // do triangle intersections
+		  }
+	  }
+
+
+	  // sphere intersection check
+	  if (t != FLT_MAX)
+	  {
+		  colors[index] = vec3(1,0,0);
+	  }
+	  else
+	  {
+		  colors[index] = vec3(1,1,1);
+	  }
 
 	  // material check
 	  //if (numberOfMat == 7)
