@@ -9,13 +9,14 @@
 #include <cuda.h>
 #include <cmath>
 #include <vector>
+#include <vector>
+#include <time.h>
 #include "sceneStructs.h"
 #include "glm/glm.hpp"
 #include "utilities.h"
 #include "raytraceKernel.h"
 #include "intersections.h"
 #include "interactions.h"
-#include <vector>
 
 using glm::vec3;
 using glm::cross;
@@ -172,7 +173,7 @@ __device__ float intersectionTest(staticGeom* geoms, int numberOfGeoms, ray r, v
 }
 
 // send out shadow feeler rays and compute the tint color
-// this will generate hard shadows
+// this will generate hard shadows if num shadows is set to 1
 __device__ vec3 shadowFeeler(staticGeom* geoms, int numberOfGeoms, material* materials, vec3 isectPoint, vec3 isectNormal, staticGeom lightSource)
 {
 	vec3 tint = vec3(1,1,1);
@@ -181,23 +182,43 @@ __device__ vec3 shadowFeeler(staticGeom* geoms, int numberOfGeoms, material* mat
 	int shadowRayIsectMatId = -1;
 	float t = -1;
 	float eps = 1e-5;
-	ray shadowRay;
-
-	// point light
-	vec3 lightToIsect = lightSource.translation - isectPoint;
-	float maxT = length(lightToIsect);
-	shadowRay.direction = normalize(lightToIsect);
-	shadowRay.origin = isectPoint + isectNormal * eps; // consider moving this in the shadow ray direction
-
-	t = intersectionTest(geoms, numberOfGeoms, shadowRay, shadowRayIsectPoint, shadowRayIsectNormal, shadowRayIsectMatId);
-
-	if (t != -1 && t > EPSILON && materials[shadowRayIsectMatId].emittance == 0)
+	int numShadowRays = 1; // controls how many shadow rays to send. Set to 1 for hard shadows
+	float hitLight = 0;    // number of times the shadowRays hit the light
+	float maxT = 0;
+	
+	for (int i = 0 ; i < numShadowRays ; ++i)
 	{
-		if (t < maxT)
+		vec3 lightPosition = lightSource.translation;
+
+		if (lightSource.type == GEOMTYPE::SPHERE)
 		{
-			tint = vec3(0,0,0); // todo: base this one something else so we can get lighter shadows
+			lightPosition = getRandomPointOnSphere(lightSource, clock());
 		}
+		else if (lightSource.type == GEOMTYPE::CUBE)
+		{
+			lightPosition = getRandomPointOnCube(lightSource, hash(123456789));
+		}
+
+		vec3 lightToIsect = lightPosition - isectPoint;
+		maxT = max(maxT, length(lightToIsect));
+		ray shadowRay;
+		shadowRay.direction = normalize(lightToIsect);
+		shadowRay.origin = isectPoint + isectNormal * eps; // consider moving this in the shadow ray direction
+
+		t = intersectionTest(geoms, numberOfGeoms, shadowRay, shadowRayIsectPoint, shadowRayIsectNormal, shadowRayIsectMatId);
+
+		hitLight += materials[shadowRayIsectMatId].emittance / (materials[shadowRayIsectMatId].emittance + eps);
 	}
+
+	tint = tint * (hitLight / numShadowRays);
+
+	//if (t != -1 && t > EPSILON)
+	//{
+	//	if (t < maxT)
+	//	{
+	//		tint = tint * (hitLight / numShadowRays); // todo: base this one something else so we can get lighter shadows
+	//	}
+	//}
 
 	return tint;
 }
@@ -215,13 +236,14 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
   vec3 bgc = vec3(0,0,0);
   colors[index] = bgc;
   vec3 ambientColor = vec3(0.1, 0.1, 0.1);
-
+  
   if ((x<=resolution.x && y<=resolution.y))
   {
 	// supersampling for anti aliasing
 	vec3 color = vec3(0,0,0);
 	float ss = 1.0f;
 	float ssratio = 1.0f / (ss * ss);
+
 	for(float i = 1 ; i <= ss ; i++)
 	{
 		for(float j = 1 ; j <= ss ; j++)
@@ -236,8 +258,7 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 				continue;
 			}
 
-			//ray r = raycastFromCameraKernel(resolution, 0, x, y, cam.position, cam.view, cam.up, cam.fov);
-			ray r = raycastFromCameraKernel(resolution, 0, ssx+ x, ssy+ y, cam.position, cam.view, cam.up, cam.fov);
+			ray r = raycastFromCameraKernel(resolution, 0, ssx + x, ssy + y, cam.position, cam.view, cam.up, cam.fov);
 
 			vec3 isectPoint = vec3(0,0,0);
 			vec3 isectNormal = vec3(0,0,0);
@@ -263,30 +284,21 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 						staticGeom lightSource = geoms[cudalightIndex[i]];
 						vec3 tint = shadowFeeler(geoms, numberOfGeoms, cudamat, isectPoint, isectNormal, lightSource);
 
-						if (tint == vec3(0,0,0))
-						{
-							color = color + ssratio * tint;
-						}
-						else
-						{
-							vec3 IsectToLight = normalize(lightSource.translation - isectPoint);
-							vec3 IsectToEye = normalize(cam.position - isectPoint);
-							vec3 lightColor = cudamat[lightSource.materialid].color;
-							vec3 materialColor = cudamat[matId].color;
-							float lightIntensity = cudamat[lightSource.materialid].emittance;
-							float diffuseTerm = clamp(dot(isectNormal, IsectToLight), 0.0f, 1.0f);
+						vec3 IsectToLight = normalize(lightSource.translation - isectPoint);
+						vec3 IsectToEye = normalize(cam.position - isectPoint);
+						vec3 lightColor = cudamat[lightSource.materialid].color;
+						vec3 materialColor = cudamat[matId].color;
+						float lightIntensity = cudamat[lightSource.materialid].emittance;
+						float diffuseTerm = clamp(dot(isectNormal, IsectToLight), 0.0f, 1.0f);
 
-							// calculate specular highlight
-							vec3 LightToIsect = -IsectToLight;
-							vec3 specReflectedRay = calculateReflectionDirection(isectNormal, LightToIsect);
-							float specularTerm = pow(max(0.0f, dot(specReflectedRay, IsectToEye)), isectMat.specularExponent);
-							float ks = 0.3;
-							float kd = 0.7;
-							color = color + ssratio * (ambientColor * materialColor + 
-								lightIntensity * lightColor * 
-								(kd * materialColor * diffuseTerm + 
-								ks * isectMat.specularColor * specularTerm * isectMat.specularExponent));
-						}
+						// calculate specular highlight
+						vec3 LightToIsect = -IsectToLight;
+						vec3 specReflectedRay = calculateReflectionDirection(isectNormal, LightToIsect);
+						float specularTerm = pow(max(0.0f, dot(specReflectedRay, IsectToEye)), isectMat.specularExponent);
+						float ks = 0.3;
+						float kd = 0.7;
+						color = color + tint * ssratio * (ambientColor * materialColor + lightIntensity * lightColor * 
+							(kd * materialColor * diffuseTerm + ks * isectMat.specularColor * specularTerm * isectMat.specularExponent));
 					}
 				}
 			}
