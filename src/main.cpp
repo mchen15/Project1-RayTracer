@@ -104,9 +104,10 @@ void runCuda(){
 
   // Map OpenGL buffer object for writing from CUDA on a single GPU
   // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
-  
+
   if(iterations<renderCam->iterations){
     uchar4 *dptr=NULL;
+	
     iterations++;
     cudaGLMapBufferObject((void**)&dptr, pbo);
   

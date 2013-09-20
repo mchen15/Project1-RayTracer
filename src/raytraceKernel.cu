@@ -82,13 +82,16 @@ __global__ void clearImage(glm::vec2 resolution, glm::vec3* image){
 }
 
 //Kernel that writes the image to the OpenGL PBO directly.
-__global__ void sendImageToPBO(uchar4* PBOpos, glm::vec2 resolution, glm::vec3* image){
+__global__ void sendImageToPBO(uchar4* PBOpos, float iteration, glm::vec2 resolution, glm::vec3* prevImage, glm::vec3* image){
   
   int x = (blockIdx.x * blockDim.x) + threadIdx.x;
   int y = (blockIdx.y * blockDim.y) + threadIdx.y;
   int index = x + (y * resolution.x);
   
-  if(x<=resolution.x && y<=resolution.y){
+  if(x<=resolution.x && y<=resolution.y)
+  {
+	  if (iteration > 1)
+		  image[index] = (image[index] * (iteration - 1) + prevImage[index]) / iteration;
 
       glm::vec3 color;
       color.x = image[index].x*255.0;
@@ -190,13 +193,13 @@ __device__ vec3 shadowFeeler(staticGeom* geoms, int numberOfGeoms, material* mat
 	{
 		vec3 lightPosition = lightSource.translation;
 
-		if (lightSource.type == GEOMTYPE::SPHERE)
+		if (lightSource.type == GEOMTYPE::SPHERE && numShadowRays != 1)
 		{
 			lightPosition = getRandomPointOnSphere(lightSource, clock());
 		}
-		else if (lightSource.type == GEOMTYPE::CUBE)
+		else if (lightSource.type == GEOMTYPE::CUBE && numShadowRays != 1)
 		{
-			lightPosition = getRandomPointOnCube(lightSource, hash(123456789));
+			lightPosition = getRandomPointOnCube(lightSource, hash(clock()));
 		}
 
 		vec3 lightToIsect = lightPosition - isectPoint;
@@ -223,90 +226,95 @@ __device__ vec3 shadowFeeler(staticGeom* geoms, int numberOfGeoms, material* mat
 	return tint;
 }
 
-
 //TODO: IMPLEMENT THIS FUNCTION
 //Core raytracer kernel
-__global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, int rayDepth, glm::vec3* colors,
+__device__ void raytraceRay(ray r, float ssratio, int index, int rayDepth, glm::vec3* colors, cameraData cam,
                             staticGeom* geoms, int numberOfGeoms, material* cudamat, int numberOfMat, int* cudalightIndex, int numberOfLights){
 
-  int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-  int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-  int index = x + (y * resolution.x);
-  
-  vec3 bgc = vec3(0,0,0);
-  colors[index] = bgc;
-  vec3 ambientColor = vec3(0.1, 0.1, 0.1);
-  
-  if ((x<=resolution.x && y<=resolution.y))
-  {
-	// supersampling for anti aliasing
 	vec3 color = vec3(0,0,0);
-	float ss = 1.0f;
-	float ssratio = 1.0f / (ss * ss);
-
-	for(float i = 1 ; i <= ss ; i++)
+	vec3 reflectedColor = vec3(0,0,0);
+	vec3 bgc = vec3(0,0,0);
+	colors[index] = bgc;
+	vec3 ambientColor = vec3(0.1, 0.1, 0.1);
+  
+	if (rayDepth > MAX_DEPTH) 
 	{
-		for(float j = 1 ; j <= ss ; j++)
-		{
-			float ssx = i / ss - 1 / (ss*2.0f);
-			float ssy = j / ss - 1 / (ss*2.0f);
+		//bgc
+		color = vec3(0,0,0); 
+		return;
+	}
 
-			if (rayDepth > MAX_DEPTH) 
-			{
-				//bgc
-				color = vec3(0,0,0); 
-				continue;
-			}
+	vec3 isectPoint = vec3(0,0,0);
+	vec3 isectNormal = vec3(0,0,0);
+	int matId = -1;
+	float t = FLT_MAX;
 
-			ray r = raycastFromCameraKernel(resolution, 0, ssx + x, ssy + y, cam.position, cam.view, cam.up, cam.fov);
+	t = intersectionTest(geoms, numberOfGeoms, r, isectPoint, isectNormal, matId); // need to do something special for t == -1?
 
-			vec3 isectPoint = vec3(0,0,0);
-			vec3 isectNormal = vec3(0,0,0);
-			int matId = -1;
-			float t = FLT_MAX;
 
-			t = intersectionTest(geoms, numberOfGeoms, r, isectPoint, isectNormal, matId); // need to do something special for t == -1?
-
-			if (t != -1)
-			{
-				material isectMat = cudamat[matId];
+	if (t != -1)
+	{
+		material isectMat = cudamat[matId];
 		
-				// hit light source, so use the light source's color directly
-				if (isectMat.emittance != 0)
-				{
-					color = color + ssratio * isectMat.color;
-				}
-				else
-				{
-					// go through each light source and compute shading
-					for (int i = 0 ; i < numberOfLights ; ++i)
-					{
-						staticGeom lightSource = geoms[cudalightIndex[i]];
-						vec3 tint = shadowFeeler(geoms, numberOfGeoms, cudamat, isectPoint, isectNormal, lightSource);
+		// reflection
+		if (isectMat.hasReflective > 0)
+		{
+			vec3 reflectedDirection = calculateReflectionDirection(isectNormal, r.direction);
+			ray reflectedRay;
+			reflectedRay.direction = normalize(reflectedDirection);
+			reflectedRay.origin = isectPoint + isectNormal * (float)1e-5;
 
-						vec3 IsectToLight = normalize(lightSource.translation - isectPoint);
-						vec3 IsectToEye = normalize(cam.position - isectPoint);
-						vec3 lightColor = cudamat[lightSource.materialid].color;
-						vec3 materialColor = cudamat[matId].color;
-						float lightIntensity = cudamat[lightSource.materialid].emittance;
-						float diffuseTerm = clamp(dot(isectNormal, IsectToLight), 0.0f, 1.0f);
+			// Temp: Shoot the reflected ray and see which object it hits. Use the object's color instead.
+			vec3 reflectedIsectPoint = vec3(0,0,0);
+			vec3 reflectedIsectNormal = vec3(0,0,0);
+			int reflectedMatId = -1;
+			float rt = intersectionTest(geoms, numberOfGeoms, reflectedRay, reflectedIsectPoint, reflectedIsectNormal, reflectedMatId);
+			 
+			if (rt != -1)
+				reflectedColor = isectMat.hasReflective * cudamat[reflectedMatId].color;
 
-						// calculate specular highlight
-						vec3 LightToIsect = -IsectToLight;
-						vec3 specReflectedRay = calculateReflectionDirection(isectNormal, LightToIsect);
-						float specularTerm = pow(max(0.0f, dot(specReflectedRay, IsectToEye)), isectMat.specularExponent);
-						float ks = 0.3;
-						float kd = 0.7;
-						color = color + tint * ssratio * (ambientColor * materialColor + lightIntensity * lightColor * 
-							(kd * materialColor * diffuseTerm + ks * isectMat.specularColor * specularTerm * isectMat.specularExponent));
-					}
-				}
+
+			// recurse
+			//raytraceRay(reflectedRay, ssratio, index, rayDepth+1, colors, cam, geoms, numberOfGeoms, cudamat, numberOfMat, cudalightIndex, numberOfLights);
+		}
+
+
+		// hit light source, so use the light source's color directly
+		if (isectMat.emittance != 0)
+		{
+			color = color + ssratio * isectMat.color;
+		}
+		else
+		{
+			color = ambientColor + reflectedColor;
+
+
+			// go through each light source and compute shading
+			for (int i = 0 ; i < numberOfLights ; ++i)
+			{
+				staticGeom lightSource = geoms[cudalightIndex[i]];
+				vec3 tint = shadowFeeler(geoms, numberOfGeoms, cudamat, isectPoint, isectNormal, lightSource);
+
+				vec3 IsectToLight = normalize(lightSource.translation - isectPoint);
+				vec3 IsectToEye = normalize(cam.position - isectPoint);
+				vec3 lightColor = cudamat[lightSource.materialid].color;
+				vec3 materialColor = cudamat[matId].color;
+				float lightIntensity = cudamat[lightSource.materialid].emittance;
+				float diffuseTerm = clamp(dot(isectNormal, IsectToLight), 0.0f, 1.0f);
+
+				// calculate specular highlight
+				vec3 LightToIsect = -IsectToLight;
+				vec3 specReflectedRay = calculateReflectionDirection(isectNormal, LightToIsect);
+				float specularTerm = pow(max(0.0f, dot(specReflectedRay, IsectToEye)), isectMat.specularExponent);
+				float ks = 0.3;
+				float kd = 0.7;
+				color = color + tint * ssratio * (lightIntensity * lightColor * 
+					(kd * materialColor * diffuseTerm + ks * isectMat.specularColor * specularTerm * isectMat.specularExponent));
 			}
 		}
 	}
 
 	colors[index] = color;
-
 
 	  ////////////////
 	  // debug code //
@@ -340,9 +348,32 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 		 // colors[index] = generateRandomNumberFromThread(resolution, time, x, y);
 	  //else
 		 // colors[index] = vec3(0,0,0);
-  }
 }
 
+// Calls Core raytracer kernel starting from eye
+__global__ void launchRaytraceRay(glm::vec2 resolution, float time, cameraData cam, int rayDepth, glm::vec3* colors,
+                            staticGeom* geoms, int numberOfGeoms, material* cudamat, int numberOfMat, int* cudalightIndex, int numberOfLights)
+{
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+	int index = x + (y * resolution.x);
+	
+	// supersampling for anti aliasing
+	float ss = 1.0f;
+	float ssratio = 1.0f / (ss * ss);
+
+	for(float i = 1 ; i <= ss ; i++)
+	{
+		for(float j = 1 ; j <= ss ; j++)
+		{
+			float ssx = i / ss - 1 / (ss*2.0f);
+			float ssy = j / ss - 1 / (ss*2.0f);
+
+			ray r = raycastFromCameraKernel(resolution, 0, ssx + x, ssy + y, cam.position, cam.view, cam.up, cam.fov);
+			raytraceRay(r, ssratio, index, rayDepth, colors, cam, geoms, numberOfGeoms, cudamat, numberOfMat, cudalightIndex, numberOfLights);
+		}
+	}
+}
 
 //TODO: FINISH THIS FUNCTION
 // Wrapper for the __global__ call that sets up the kernel calls and does a ton of memory management
@@ -360,6 +391,7 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   cudaMalloc((void**)&cudaimage, (int)renderCam->resolution.x*(int)renderCam->resolution.y*sizeof(glm::vec3));
   cudaMemcpy( cudaimage, renderCam->image, (int)renderCam->resolution.x*(int)renderCam->resolution.y*sizeof(glm::vec3), cudaMemcpyHostToDevice);
   
+
   //package geometry and materials and sent to GPU
   int numberOfLights = 0;
   std::vector<int> lightIndices;
@@ -419,10 +451,16 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   cam.up = renderCam->ups[frame];
   cam.fov = renderCam->fov;
 
-  //kernel launches
-  raytraceRay<<<fullBlocksPerGrid, threadsPerBlock>>>(renderCam->resolution, (float)iterations, cam, traceDepth, cudaimage, cudageoms, numberOfGeoms, cudamat, numberOfMat, cudalightIndex, numberOfLights);
+  //kernel launch
+  launchRaytraceRay<<<fullBlocksPerGrid, threadsPerBlock>>>(renderCam->resolution, (float)iterations, cam, traceDepth, cudaimage, cudageoms, numberOfGeoms, cudamat, numberOfMat, cudalightIndex, numberOfLights);
 
-  sendImageToPBO<<<fullBlocksPerGrid, threadsPerBlock>>>(PBOpos, renderCam->resolution, cudaimage);
+  // retrieve previous image from the camera
+  glm::vec3* cudaPrevImage = NULL;
+  cudaMalloc((void**)&cudaPrevImage, (int)renderCam->resolution.x*(int)renderCam->resolution.y*sizeof(glm::vec3));
+  cudaMemcpy(cudaPrevImage, renderCam->image, (int)renderCam->resolution.x*(int)renderCam->resolution.y*sizeof(glm::vec3), cudaMemcpyHostToDevice);
+
+  //kernel launch
+  sendImageToPBO<<<fullBlocksPerGrid, threadsPerBlock>>>(PBOpos, (float)iterations, renderCam->resolution, cudaPrevImage, cudaimage);
 
   //retrieve image from GPU
   cudaMemcpy( renderCam->image, cudaimage, (int)renderCam->resolution.x*(int)renderCam->resolution.y*sizeof(glm::vec3), cudaMemcpyDeviceToHost);
@@ -430,6 +468,7 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   //free up stuff, or else we'll leak memory like a madman
   cudaFree( cudaimage );
   cudaFree( cudageoms );
+  cudaFree( cudaPrevImage );
   delete geomList;
 
   // make certain the kernel has completed
