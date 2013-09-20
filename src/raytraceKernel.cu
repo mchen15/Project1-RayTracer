@@ -51,7 +51,7 @@ __host__ __device__ glm::vec3 generateRandomNumberFromThread(glm::vec2 resolutio
 
 //TODO: IMPLEMENT THIS FUNCTION
 //Function that does the initial raycast from the camera
-__host__ __device__ ray raycastFromCameraKernel(glm::vec2 resolution, float time, int x, int y, glm::vec3 eye, glm::vec3 view, glm::vec3 up, glm::vec2 fov)
+__host__ __device__ ray raycastFromCameraKernel(glm::vec2 resolution, float time, float x, float y, glm::vec3 eye, glm::vec3 view, glm::vec3 up, glm::vec2 fov)
 {
   ray r;
   float width = resolution.x;
@@ -59,9 +59,9 @@ __host__ __device__ ray raycastFromCameraKernel(glm::vec2 resolution, float time
   vec3 M = eye + view;
   vec3 A = cross(view, up);
   vec3 B = cross(A, view);
-  vec3 H = (A * length(view) * tanf(fov.x * (PI/180.0f))) / length(A);
-  vec3 V = -(B * length(view) * tanf(fov.y * (PI/180.0f))) / length(B); // LOOK: Multiplied by negative to flip the image
-  vec3 P = M + ((2*x)/(width-1)-1)*H + ((2*y)/(height-1)-1)*V;
+  vec3 H = (A * length(view) * tanf(fov.x * ((float)PI/180.0f))) / length(A);
+  vec3 V = -(B * length(view) * tanf(fov.y * ((float)PI/180.0f))) / length(B); // LOOK: Multiplied by negative to flip the image
+  vec3 P = M + ((2.0f*x)/(width-1)-1)*H + ((2.0f*y)/(height-1)-1)*V;
   vec3 D = P - eye;
   vec3 DN = glm::normalize(D);
 
@@ -172,6 +172,7 @@ __device__ float intersectionTest(staticGeom* geoms, int numberOfGeoms, ray r, v
 }
 
 // send out shadow feeler rays and compute the tint color
+// this will generate hard shadows
 __device__ vec3 shadowFeeler(staticGeom* geoms, int numberOfGeoms, material* materials, vec3 isectPoint, vec3 isectNormal, staticGeom lightSource)
 {
 	vec3 tint = vec3(1,1,1);
@@ -217,70 +218,83 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 
   if ((x<=resolution.x && y<=resolution.y))
   {
-	  if (rayDepth > MAX_DEPTH) 
-	  {
-		  //bgc
-		  colors[index] = vec3(0,0,0); 
-		  return;
-	  }
+	// supersampling for anti aliasing
+	vec3 color = vec3(0,0,0);
+	float ss = 1.0f;
+	float ssratio = 1.0f / (ss * ss);
+	for(float i = 1 ; i <= ss ; i++)
+	{
+		for(float j = 1 ; j <= ss ; j++)
+		{
+			float ssx = i / ss - 1 / (ss*2.0f);
+			float ssy = j / ss - 1 / (ss*2.0f);
 
-	  ray r = raycastFromCameraKernel(resolution, 0, x, y, cam.position, cam.view, cam.up, cam.fov);
+			if (rayDepth > MAX_DEPTH) 
+			{
+				//bgc
+				color = vec3(0,0,0); 
+				continue;
+			}
 
-	  vec3 isectPoint = vec3(0,0,0);
-	  vec3 isectNormal = vec3(0,0,0);
-	  int matId = -1;
-	  float t = FLT_MAX;
+			//ray r = raycastFromCameraKernel(resolution, 0, x, y, cam.position, cam.view, cam.up, cam.fov);
+			ray r = raycastFromCameraKernel(resolution, 0, ssx+ x, ssy+ y, cam.position, cam.view, cam.up, cam.fov);
 
-	  t = intersectionTest(geoms, numberOfGeoms, r, isectPoint, isectNormal, matId); // need to do something special for t == -1?
+			vec3 isectPoint = vec3(0,0,0);
+			vec3 isectNormal = vec3(0,0,0);
+			int matId = -1;
+			float t = FLT_MAX;
 
-	  if (t != -1)
-	  {
-		  material isectMat = cudamat[matId];
+			t = intersectionTest(geoms, numberOfGeoms, r, isectPoint, isectNormal, matId); // need to do something special for t == -1?
+
+			if (t != -1)
+			{
+				material isectMat = cudamat[matId];
 		
-		  // hit light source, so use the light source's color directly
-		  if (isectMat.emittance != 0)
-		  {
-			  colors[index] = isectMat.color;
-		  }
-		  else
-		  {
-			  // go through each light source and compute shading
-			  for (int i = 0 ; i < numberOfLights ; ++i)
-			  {
-				  staticGeom lightSource = geoms[cudalightIndex[i]];
-				  vec3 tint = shadowFeeler(geoms, numberOfGeoms, cudamat, isectPoint, isectNormal, lightSource);
+				// hit light source, so use the light source's color directly
+				if (isectMat.emittance != 0)
+				{
+					color = color + ssratio * isectMat.color;
+				}
+				else
+				{
+					// go through each light source and compute shading
+					for (int i = 0 ; i < numberOfLights ; ++i)
+					{
+						staticGeom lightSource = geoms[cudalightIndex[i]];
+						vec3 tint = shadowFeeler(geoms, numberOfGeoms, cudamat, isectPoint, isectNormal, lightSource);
 
-				  if (tint == vec3(0,0,0))
-				  {
-						colors[index] = tint;
-				  }
-				  else
-				  {
-					  vec3 IsectToLight = normalize(lightSource.translation - isectPoint);
-					  vec3 IsectToEye = normalize(cam.position - isectPoint);
-					  vec3 lightColor = cudamat[lightSource.materialid].color;
-					  vec3 materialColor = cudamat[matId].color;
-					  float lightIntensity = cudamat[lightSource.materialid].emittance;
-					  float diffuseTerm = clamp(dot(isectNormal, IsectToLight), 0.0f, 1.0f);
+						if (tint == vec3(0,0,0))
+						{
+							color = color + ssratio * tint;
+						}
+						else
+						{
+							vec3 IsectToLight = normalize(lightSource.translation - isectPoint);
+							vec3 IsectToEye = normalize(cam.position - isectPoint);
+							vec3 lightColor = cudamat[lightSource.materialid].color;
+							vec3 materialColor = cudamat[matId].color;
+							float lightIntensity = cudamat[lightSource.materialid].emittance;
+							float diffuseTerm = clamp(dot(isectNormal, IsectToLight), 0.0f, 1.0f);
 
-					  // calculate specular highlight
-					  vec3 LightToIsect = -IsectToLight;
-					  vec3 specReflectedRay = calculateReflectionDirection(isectNormal, LightToIsect);
-					  float specularTerm = pow(max(0.0f, dot(specReflectedRay, IsectToEye)), isectMat.specularExponent);
-					  float ks = 0.3;
-					  float kd = 0.7;
-					  colors[index] = colors[index] + ambientColor + 
-						  lightIntensity * lightColor * 
-						  (kd * materialColor * diffuseTerm + 
-						   ks * isectMat.specularColor * specularTerm * isectMat.specularExponent);
-				  }
-			  }
-		  }
-	  }
-	  else
-	  {
-		  colors[index] = bgc;
-	  }
+							// calculate specular highlight
+							vec3 LightToIsect = -IsectToLight;
+							vec3 specReflectedRay = calculateReflectionDirection(isectNormal, LightToIsect);
+							float specularTerm = pow(max(0.0f, dot(specReflectedRay, IsectToEye)), isectMat.specularExponent);
+							float ks = 0.3;
+							float kd = 0.7;
+							color = color + ssratio * (ambientColor * materialColor + 
+								lightIntensity * lightColor * 
+								(kd * materialColor * diffuseTerm + 
+								ks * isectMat.specularColor * specularTerm * isectMat.specularExponent));
+						}
+					}
+				}
+			}
+		}
+	}
+
+	colors[index] = color;
+
 
 	  ////////////////
 	  // debug code //
