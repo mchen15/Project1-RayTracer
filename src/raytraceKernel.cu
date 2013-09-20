@@ -116,6 +116,13 @@ __global__ void sendImageToPBO(uchar4* PBOpos, glm::vec2 resolution, glm::vec3* 
 
 // Loop through geometry and test against ray.
 // Returns -1 if no object is intersected with the ray, else returns t such that isectPoint = P + Dt 
+// Input:  staticGeom* geoms: array of geometry in the scene
+//         int numberOfGeoms: number of geoms in the scene
+//		   ray r: the ray that is to be intersected with all the geometry
+// Output: vec3 isectPoint: holders the intersection point.
+//		   vec3 isectNormal: holds the normal at the intersection point.
+//		   int matId: the index of the material of the intersected geometry
+//		   
 __device__ float intersectionTest(staticGeom* geoms, int numberOfGeoms, ray r, vec3 &isectPoint, vec3 &isectNormal, int &matId)
 {
 	float t = FLT_MAX;
@@ -183,7 +190,7 @@ __device__ vec3 shadowFeeler(staticGeom* geoms, int numberOfGeoms, material* mat
 
 	t = intersectionTest(geoms, numberOfGeoms, shadowRay, shadowRayIsectPoint, shadowRayIsectNormal, shadowRayIsectMatId);
 
-	if (t != -1 && t > EPSILON)
+	if (t != -1 && t > EPSILON && materials[shadowRayIsectMatId].emittance == 0)
 	{
 		if (t < maxT)
 		{
@@ -204,16 +211,18 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
   int y = (blockIdx.y * blockDim.y) + threadIdx.y;
   int index = x + (y * resolution.x);
   
-  colors[index] = vec3(0,0,0);
+  vec3 bgc = vec3(0,0,0);
+  colors[index] = bgc;
+  vec3 ambientColor = vec3(0.1, 0.1, 0.1);
 
   if ((x<=resolution.x && y<=resolution.y))
   {
-	  //if (rayDepth > MAX_DEPTH) 
-	  //{
-		 // //bgc
-		 // colors[index] = vec3(0,0,0); 
-		 // return;
-	  //}
+	  if (rayDepth > MAX_DEPTH) 
+	  {
+		  //bgc
+		  colors[index] = vec3(0,0,0); 
+		  return;
+	  }
 
 	  ray r = raycastFromCameraKernel(resolution, 0, x, y, cam.position, cam.view, cam.up, cam.fov);
 
@@ -222,30 +231,57 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 	  int matId = -1;
 	  float t = FLT_MAX;
 
-	  t = intersectionTest(geoms, numberOfGeoms, r, isectPoint, isectNormal, matId);
+	  t = intersectionTest(geoms, numberOfGeoms, r, isectPoint, isectNormal, matId); // need to do something special for t == -1?
 
-	  // go through each light source and compute shading
-	  for (int i = 0 ; i < numberOfLights ; ++i)
+	  if (t != -1)
 	  {
-		  staticGeom lightSource = geoms[cudalightIndex[i]];
-		  vec3 tint = shadowFeeler(geoms, numberOfGeoms, cudamat, isectPoint, isectNormal, lightSource);
-
-		  if (tint == vec3(0,0,0))
+		  material isectMat = cudamat[matId];
+		
+		  // hit light source, so use the light source's color directly
+		  if (isectMat.emittance != 0)
 		  {
-				colors[index] = tint;
-				continue;
+			  colors[index] = isectMat.color;
 		  }
+		  else
+		  {
+			  // go through each light source and compute shading
+			  for (int i = 0 ; i < numberOfLights ; ++i)
+			  {
+				  staticGeom lightSource = geoms[cudalightIndex[i]];
+				  vec3 tint = shadowFeeler(geoms, numberOfGeoms, cudamat, isectPoint, isectNormal, lightSource);
 
-		  vec3 lightToISect = normalize(lightSource.translation - isectPoint);
-		  vec3 eyeToIsect = normalize(cam.position - isectPoint);
-		  vec3 lightColor = cudamat[lightSource.materialid].color;
-		  vec3 materialColor = cudamat[matId].color;
-		  //float lightEmit = cudamat[lightSource.materialid].emittance;
+				  if (tint == vec3(0,0,0))
+				  {
+						colors[index] = tint;
+				  }
+				  else
+				  {
+					  vec3 IsectToLight = normalize(lightSource.translation - isectPoint);
+					  vec3 IsectToEye = normalize(cam.position - isectPoint);
+					  vec3 lightColor = cudamat[lightSource.materialid].color;
+					  vec3 materialColor = cudamat[matId].color;
+					  float lightIntensity = cudamat[lightSource.materialid].emittance;
+					  float diffuseTerm = clamp(dot(isectNormal, IsectToLight), 0.0f, 1.0f);
 
-		  float diffuseTerm = clamp(dot(isectNormal, lightToISect), 0.0f, 1.0f);
-		  colors[index] = colors[index] + materialColor * lightColor * diffuseTerm;
+					  // calculate specular highlight
+					  vec3 LightToIsect = -IsectToLight;
+					  vec3 specReflectedRay = calculateReflectionDirection(isectNormal, LightToIsect);
+					  float specularTerm = pow(max(0.0f, dot(specReflectedRay, IsectToEye)), isectMat.specularExponent);
+					  float ks = 0.3;
+					  float kd = 0.7;
+					  colors[index] = colors[index] + ambientColor + 
+						  lightIntensity * lightColor * 
+						  (kd * materialColor * diffuseTerm + 
+						   ks * isectMat.specularColor * specularTerm * isectMat.specularExponent);
+				  }
+			  }
+		  }
 	  }
-	  
+	  else
+	  {
+		  colors[index] = bgc;
+	  }
+
 	  ////////////////
 	  // debug code //
 	  ////////////////
@@ -272,7 +308,6 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 		 // colors[index] = generateRandomNumberFromThread(resolution, time, x, y);
 	  //else
 		 // colors[index] = vec3(0,0,0);
-
 
 	  // light check
 	  //if (cudalights[0].emittance == 1 && cudalights[1].emittance == 15)
@@ -338,8 +373,6 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
  int* cudalightIndex = NULL;
  cudaMalloc((void**) &cudalightIndex, numberOfLights * sizeof(int));
  cudaMemcpy(cudalightIndex, &(lightIndices[0]), numberOfLights * sizeof(int), cudaMemcpyHostToDevice);
-
-
 
   // Regaring (void**) ...
   // All CUDA API functions return an error code (or cudaSuccess if no error occured). 

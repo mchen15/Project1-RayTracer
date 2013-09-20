@@ -143,7 +143,8 @@ void runCuda(){
       gammaSettings gamma;
       gamma.applyGamma = true;
       gamma.gamma = 1.0/2.2;
-      gamma.divisor = renderCam->iterations;
+      //gamma.divisor = renderCam->iterations;
+	  gamma.divisor = 1;
       outputImage.setGammaSettings(gamma);
       string filename = renderCam->imageName;
       string s;

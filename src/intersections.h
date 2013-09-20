@@ -318,9 +318,23 @@ __host__ __device__ glm::vec3 getRandomPointOnCube(staticGeom cube, float random
 
 //TODO: IMPLEMENT THIS FUNCTION
 //Generates a random point on a given sphere
-__host__ __device__ glm::vec3 getRandomPointOnSphere(staticGeom sphere, float randomSeed){
+__host__ __device__ glm::vec3 getRandomPointOnSphere(staticGeom sphere, float randomSeed)
+{
+	thrust::default_random_engine rng(hash(randomSeed));
+	thrust::uniform_real_distribution<float> xi1(0, 1);
+	thrust::uniform_real_distribution<float> xi2(0, 1);
 
-  return glm::vec3(0,0,0);
+	float theta = 2.0f * PI * xi1(rng);
+	float phi = acosf(2 * xi2(rng) - 1);
+
+	float x = sin(phi) * sin(theta);
+	float y = sin(phi) * cos(theta);
+	float z = cos(phi);
+
+	glm::vec3 point = glm::vec3(x,y,z);
+	glm::vec3 finalPoint = multiplyMV(sphere.transform, glm::vec4(point, 1.0f));
+
+	return finalPoint;
 }
 
 #endif
