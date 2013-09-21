@@ -360,7 +360,7 @@ __global__ void launchRaytraceRay(glm::vec2 resolution, float time, cameraData c
 	int index = x + (y * resolution.x);
 	
 	// supersampling for anti aliasing
-	float ss = 2.0f;
+	float ss = 3.0f;
 	//float ssratio = 1.0f / (ss * ss);
 	float ssratio = 1.0f; //TODO: Fix this!
 
@@ -382,9 +382,10 @@ __global__ void launchRaytraceRay(glm::vec2 resolution, float time, cameraData c
 void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iterations, material* materials, int numberOfMaterials, geom* geoms, int numberOfGeoms){
   
   int traceDepth = 1; //determines how many bounces the raytracer traces
+  float ti = time(NULL);
 
   // set up crucial magic
-  int tileSize = 8;
+  int tileSize = 16;
   dim3 threadsPerBlock(tileSize, tileSize);
   dim3 fullBlocksPerGrid((int)ceil(float(renderCam->resolution.x)/float(tileSize)), (int)ceil(float(renderCam->resolution.y)/float(tileSize)));
   
@@ -452,8 +453,6 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   cam.view = renderCam->views[frame];
   cam.up = renderCam->ups[frame];
   cam.fov = renderCam->fov;
-
-  float ti = time(NULL);
 
   //kernel launch
   launchRaytraceRay<<<fullBlocksPerGrid, threadsPerBlock>>>(renderCam->resolution, (float)iterations, cam, traceDepth, cudaimage, cudageoms, numberOfGeoms, cudamat, numberOfMat, cudalightIndex, numberOfLights, ti);

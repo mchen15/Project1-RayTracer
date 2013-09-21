@@ -489,7 +489,7 @@ C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v5.5\include\thrust/random/de
 C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v5.5\include\math_constants.h
 C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v5.5\include\cuda.h
 c:\users\mikey\dropbox\upenn\cis-565 (gpu programming)\assignments\project1raytracer\src\sceneStructs.h
-C:\ProgramData\NVIDIA Corporation\CUDA Samples\v5.5\common\inc\helper_math.h
+C:/ProgramData/NVIDIA Corporation/CUDA Samples/v5.5/common/inc\helper_math.h
 C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v5.5\include\cuda_runtime.h
 c:\users\mikey\dropbox\upenn\cis-565 (gpu programming)\assignments\project1raytracer\src\intersections.h
 c:\users\mikey\dropbox\upenn\cis-565 (gpu programming)\assignments\project1raytracer\src\sceneStructs.h
@@ -499,4 +499,4 @@ c:\users\mikey\dropbox\upenn\cis-565 (gpu programming)\assignments\project1raytr
 c:\users\mikey\dropbox\upenn\cis-565 (gpu programming)\assignments\project1raytracer\src\utilities.h
 c:\users\mikey\dropbox\upenn\cis-565 (gpu programming)\assignments\project1raytracer\src\interactions.h
 c:\users\mikey\dropbox\upenn\cis-565 (gpu programming)\assignments\project1raytracer\src\intersections.h
-C:\ProgramData\NVIDIA Corporation\CUDA Samples\v5.5\common\inc\helper_math.h
+C:/ProgramData/NVIDIA Corporation/CUDA Samples/v5.5/common/inc\helper_math.h
