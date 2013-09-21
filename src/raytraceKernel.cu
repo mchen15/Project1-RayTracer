@@ -210,7 +210,7 @@ __device__ vec3 shadowFeeler(staticGeom* geoms, int numberOfGeoms, material* mat
 
 		t = intersectionTest(geoms, numberOfGeoms, shadowRay, shadowRayIsectPoint, shadowRayIsectNormal, shadowRayIsectMatId);
 
-		if (t != FLT_MAX)
+		//if (t != FLT_MAX)
 			hitLight += materials[shadowRayIsectMatId].emittance / (materials[shadowRayIsectMatId].emittance + eps);
 	}
 
@@ -305,8 +305,8 @@ __device__ void raytraceRay(ray r, float ssratio, int index, int rayDepth, glm::
 				vec3 LightToIsect = -IsectToLight;
 				vec3 specReflectedRay = calculateReflectionDirection(isectNormal, LightToIsect);
 				float specularTerm = pow(max(0.0f, dot(specReflectedRay, IsectToEye)), isectMat.specularExponent);
-				float ks = 0.1;
-				float kd = 0.9;
+				float ks = 0.2;
+				float kd = 0.7;
 				float lightDist = length(IsectToLight);
 				float distAttenuation = 1.0f / (lightDist * lightDist);
 				color = color + (1-isectMat.hasReflective) * tint * ssratio * (lightIntensity * lightColor * distAttenuation * 
