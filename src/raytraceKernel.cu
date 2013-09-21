@@ -90,8 +90,8 @@ __global__ void sendImageToPBO(uchar4* PBOpos, float iteration, glm::vec2 resolu
   
   if(x<=resolution.x && y<=resolution.y)
   {
-	  if (iteration > 1)
-		 image[index] = (image[index] * (iteration - 1) + prevImage[index]) / iteration;
+	  /*if (iteration > 1)
+		 image[index] = (image[index] * (iteration - 1) + prevImage[index]) / iteration;*/
 
       glm::vec3 color;
       color.x = image[index].x*255.0;
@@ -185,7 +185,7 @@ __device__ vec3 shadowFeeler(staticGeom* geoms, int numberOfGeoms, material* mat
 	int shadowRayIsectMatId = -1;
 	float t = -1;
 	float eps = 1e-5;
-	int numShadowRays = 3; // controls how many shadow rays to send. Set to 1 for hard shadows
+	int numShadowRays = 1; // controls how many shadow rays to send. Set to 1 for hard shadows
 	float hitLight = 0;    // number of times the shadowRays hit the light
 	float maxT = 0;
 	
@@ -309,7 +309,7 @@ __device__ void raytraceRay(ray r, float ssratio, int index, int rayDepth, glm::
 				float kd = 0.7;
 				float lightDist = length(IsectToLight);
 				float distAttenuation = 1.0f / (lightDist * lightDist);
-				color = color + (1-isectMat.hasReflective) * tint * ssratio * (lightIntensity * lightColor * distAttenuation * 
+				color = color + tint * ssratio * (lightIntensity * lightColor * distAttenuation * 
 					(kd * materialColor * diffuseTerm + ks * isectMat.specularColor * specularTerm * isectMat.specularExponent));
 			}
 		}
@@ -360,8 +360,9 @@ __global__ void launchRaytraceRay(glm::vec2 resolution, float time, cameraData c
 	int index = x + (y * resolution.x);
 	
 	// supersampling for anti aliasing
-	float ss = 1.0f;
-	float ssratio = 1.0f / (ss * ss);
+	float ss = 2.0f;
+	//float ssratio = 1.0f / (ss * ss);
+	float ssratio = 1.0f; //TODO: Fix this!
 
 	for(float i = 1 ; i <= ss ; i++)
 	{
