@@ -8,10 +8,24 @@ Due Thursday, 09/19/2013
 -------------------------------------------------------------------------------
 README:
 -------------------------------------------------------------------------------
-Features Implemented:
+![alt tag](https://www.dropbox.com/s/n3k9ja5bdlbidml/1.png)
 
+In this project, I have implemented a CUDA based raytracer utilizing the base code
+from the course CIS565 at University of Pennsylvania. In the base code, I was provided
+with functions such as file I/O, OpenGL setup, base CUDA kernel set up, etc. The following
+are the features that I implemented. 
 
+Features:
 
+* Raycasting from a camera into a scene through a pixel grid
+* Phong lighting for one point light source
+* Diffuse lambertian surfaces
+* Raytraced shadows
+* Cube intersection testing
+* Sphere surface point sampling
+* Supersampled antialiasing
+* Specular highlights
+* Simple mirror reflection
 
 -------------------------------------------------------------------------------
 NOTE:
