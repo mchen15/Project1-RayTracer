@@ -185,7 +185,7 @@ __device__ vec3 shadowFeeler(staticGeom* geoms, int numberOfGeoms, material* mat
 	int shadowRayIsectMatId = -1;
 	float t = -1;
 	float eps = 1e-5;
-	int numShadowRays = 1; // controls how many shadow rays to send. Set to 1 for hard shadows
+	int numShadowRays = 5; // controls how many shadow rays to send. Set to 1 for hard shadows
 	float hitLight = 0;    // number of times the shadowRays hit the light
 	float maxT = 0;
 	
@@ -199,7 +199,7 @@ __device__ vec3 shadowFeeler(staticGeom* geoms, int numberOfGeoms, material* mat
 		}
 		else if (lightSource.type == GEOMTYPE::CUBE && numShadowRays != 1)
 		{
-			lightPosition = getRandomPointOnCube(lightSource, hash(index * ti));
+			lightPosition = getRandomPointOnCube(lightSource, index * ti);
 		}
 
 		vec3 lightToIsect = lightPosition - isectPoint;
@@ -210,7 +210,7 @@ __device__ vec3 shadowFeeler(staticGeom* geoms, int numberOfGeoms, material* mat
 
 		t = intersectionTest(geoms, numberOfGeoms, shadowRay, shadowRayIsectPoint, shadowRayIsectNormal, shadowRayIsectMatId);
 
-		//if (t != FLT_MAX)
+		if (t != FLT_MAX)
 			hitLight += materials[shadowRayIsectMatId].emittance / (materials[shadowRayIsectMatId].emittance + eps);
 	}
 
@@ -360,9 +360,10 @@ __global__ void launchRaytraceRay(glm::vec2 resolution, float time, cameraData c
 	int index = x + (y * resolution.x);
 	
 	// supersampling for anti aliasing
+	vec3 color = vec3(0,0,0);
 	float ss = 3.0f;
-	//float ssratio = 1.0f / (ss * ss);
-	float ssratio = 1.0f; //TODO: Fix this!
+	float ssratio = 1.0f / (ss * ss);
+	//float ssratio = 1.0f; //TODO: Fix this!
 
 	for(float i = 1 ; i <= ss ; i++)
 	{
@@ -373,8 +374,11 @@ __global__ void launchRaytraceRay(glm::vec2 resolution, float time, cameraData c
 
 			ray r = raycastFromCameraKernel(resolution, 0, ssx + x, ssy + y, cam.position, cam.view, cam.up, cam.fov);
 			raytraceRay(r, ssratio, index, rayDepth, colors, cam, geoms, numberOfGeoms, cudamat, numberOfMat, cudalightIndex, numberOfLights, ti);
+			color = color + colors[index];
 		}
 	}
+
+	colors[index] = color;
 }
 
 
@@ -385,7 +389,7 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   float ti = time(NULL);
 
   // set up crucial magic
-  int tileSize = 32;
+  int tileSize = 8;
   dim3 threadsPerBlock(tileSize, tileSize);
   dim3 fullBlocksPerGrid((int)ceil(float(renderCam->resolution.x)/float(tileSize)), (int)ceil(float(renderCam->resolution.y)/float(tileSize)));
   
