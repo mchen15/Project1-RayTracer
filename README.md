@@ -4,7 +4,7 @@ CIS565: Project 1: CUDA Raytracer
 -------------------------------------------------------------------------------
 README:
 -------------------------------------------------------------------------------
-![alt tag]
+![alt tag](https://raw.github.com/mchen15/Project1-RayTracer/master/renders/2.png)
 
 In this project, I have implemented a CUDA based raytracer utilizing the base code
 from the course CIS565 at University of Pennsylvania. In the base code, I was provided
