@@ -267,12 +267,13 @@ __device__ void raytraceRay(ray r, float ssratio, int index, int rayDepth, glm::
 			int reflectedMatId = -1;
 			float rt = intersectionTest(geoms, numberOfGeoms, reflectedRay, reflectedIsectPoint, reflectedIsectNormal, reflectedMatId);
 			 
-			if (rt != FLT_MAX)
-				reflectedColor = isectMat.hasReflective * cudamat[reflectedMatId].color;
+			//if (rt != FLT_MAX)
+			//	reflectedColor = isectMat.hasReflective * cudamat[reflectedMatId].color;
 			// end temp
 
 			// recurse
-			//raytraceRay(reflectedRay, ssratio, index, rayDepth+1, colors, cam, geoms, numberOfGeoms, cudamat, numberOfMat, cudalightIndex, numberOfLights);
+			raytraceRay(reflectedRay, ssratio, index, rayDepth+1, colors, cam, geoms, numberOfGeoms, cudamat, numberOfMat, cudalightIndex, numberOfLights, ti);
+			reflectedColor = colors[index];
 		}
 
 
@@ -283,7 +284,7 @@ __device__ void raytraceRay(ray r, float ssratio, int index, int rayDepth, glm::
 		}
 		else
 		{
-			color = ssratio*(ambientColor + reflectedColor);
+			color = ssratio * ambientColor + reflectedColor;
 			
 			// go through each light source and compute shading
 			for (int i = 0 ; i < numberOfLights ; ++i)
@@ -380,7 +381,12 @@ __global__ void launchRaytraceRay(glm::vec2 resolution, float time, cameraData c
 
 
 // Wrapper for the __global__ call that sets up the kernel calls and does a ton of memory management
-void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iterations, material* materials, int numberOfMaterials, geom* geoms, int numberOfGeoms){
+void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iterations, material* materials, int numberOfMaterials, geom* geoms, int numberOfGeoms)
+{
+
+  // increase stack size so recursion can be used.
+  cudaDeviceSetLimit(cudaLimitStackSize, 5000*sizeof(int)); 
+
   
   int traceDepth = 1; //determines how many bounces the raytracer traces
 
