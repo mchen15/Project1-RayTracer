@@ -4,7 +4,7 @@ CIS565: Project 1: CUDA Raytracer
 -------------------------------------------------------------------------------
 README:
 -------------------------------------------------------------------------------
-![alt tag](https://raw.github.com/mchen15/Project1-RayTracer/master/renders/1.png)
+![alt tag]
 
 In this project, I have implemented a CUDA based raytracer utilizing the base code
 from the course CIS565 at University of Pennsylvania. In the base code, I was provided
@@ -34,9 +34,11 @@ Features:
 * Simple mirror reflection
 	- Rays are reflected from reflective surfaces and samples the color of the object that is
 	  intersected.
-* Attempted: Soft shadows. Multiple shadow rays and random point sampling are supported, however,
-  this feature isn't fully functional yet. (Work in progress)
-  
+* Soft shadows.
+
+Work in Progress:
+![alt tag](https://raw.github.com/mchen15/Project1-RayTracer/master/renders/1.png)
+
 Video: http://youtu.be/Tnpnndr-x28
 
 -------------------------------------------------------------------------------

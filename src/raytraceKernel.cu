@@ -191,7 +191,7 @@ __device__ vec3 shadowFeeler(staticGeom* geoms, int numberOfGeoms, material* mat
 	int shadowRayIsectMatId = -1;
 	float t = -1;
 	float eps = 1e-5;
-	int numShadowRays = 5; // controls how many shadow rays to send. Set to 1 for hard shadows
+	int numShadowRays = 2; // controls how many shadow rays to send. Set to 1 for hard shadows
 	float hitLight = 0;    // number of times the shadowRays hit the light
 	float maxT = 0;
 	
@@ -284,8 +284,9 @@ __device__ void raytraceRay(ray r, float ssratio, int index, int rayDepth, glm::
 		}
 		else
 		{
-			color = ssratio * ambientColor + reflectedColor;
-			
+			float reflectance = cudamat[matId].hasReflective;
+			color = ssratio * ambientColor + reflectance * reflectedColor;
+
 			// go through each light source and compute shading
 			for (int i = 0 ; i < numberOfLights ; ++i)
 			{
@@ -307,7 +308,8 @@ __device__ void raytraceRay(ray r, float ssratio, int index, int rayDepth, glm::
 				float kd = 0.7;
 				float lightDist = length(IsectToLight);
 				float distAttenuation = 1.0f / (lightDist * lightDist);
-				color = color + tint * ssratio * (lightIntensity * lightColor * distAttenuation * 
+				
+				color = color + (1 - reflectance) * tint * ssratio * (lightIntensity * lightColor * distAttenuation * 
 					(kd * materialColor * diffuseTerm + ks * isectMat.specularColor * specularTerm * isectMat.specularExponent));
 			}
 		}
