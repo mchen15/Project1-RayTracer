@@ -43,6 +43,7 @@
 #endif
 
 using namespace std;
+using glm::vec3;
 
 //-------------------------------
 //----------PATHTRACER-----------
