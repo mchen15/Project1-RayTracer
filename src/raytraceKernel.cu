@@ -479,6 +479,7 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   cudaFree( cudaimage );
   cudaFree( cudageoms );
   cudaFree( imageAccum );
+  cudaFree( cudamat );
   delete geomList;
 
 //  avgImage(renderCam->image);
